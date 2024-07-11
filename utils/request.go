@@ -13,14 +13,20 @@ import (
 	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"
 	"github.com/vintedMonitor/types"
+	"golang.org/x/exp/rand"
 )
 
-const BATCH_SIZE = 500
-
+type Sku struct {
+	Sku     int
+	Timeout bool
+	Time    string
+}
 type Latest_Sku_Monitor struct {
-	Latest_channel   chan string
+	Proxies          []string
+	Latest_channel   chan Sku
 	New_batch_signal chan bool
-	Latest_sku       string
+	Latest_sku       int
+	Latest_batch_sku int
 	LatestMux        sync.Mutex
 	Session          string
 }
@@ -84,7 +90,7 @@ func extractSessionCookie(cookies []string) string {
 	}
 	return ""
 }
-func (m *Latest_Sku_Monitor) Get_latest_sku(client *Client, session string, Sku_channel chan string) {
+func (m *Latest_Sku_Monitor) Get_latest_sku(client *Client, session string) int {
 	for {
 
 		url := "https://www.vinted.com/api/v2/catalog/items?page=1&per_page=96&search_text=&catalog_ids=&order=newest_first&size_ids=&brand_ids=&status_ids=&color_ids=&material_ids="
@@ -124,21 +130,46 @@ func (m *Latest_Sku_Monitor) Get_latest_sku(client *Client, session string, Sku_
 		log.Printf("(%d) - %s", resp.StatusCode, url)
 
 		var data types.CatalogueItems
-		json.Unmarshal(body, &data)
+		err = json.Unmarshal(body, &data)
+		if err != nil {
+			log.Println("Error unmarshalling into CatalogueItems: ", err)
+			continue
+		}
 
-		Sku_channel <- strconv.FormatInt(data.Items[0].ID, 10)
-		return
+		return int(data.Items[0].ID)
 	}
 
 }
 
 // makes the item requests in a for loop and dies when item is found
-func Make_request(latest_sku string, sku string, url string, session string, client *Client, m *Latest_Sku_Monitor) {
+func Make_request(sku int, session string, client *Client, latest_channel chan Sku, m *Latest_Sku_Monitor, wg *sync.WaitGroup) {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	var try = -1
+	var general_tries = 0
 	for {
+		general_tries++
 
-		url := url + sku + ".txt"
+		if m.Latest_sku > sku {
+			try++
+
+		} else {
+			if general_tries > 60 {
+				log.Println("no longer monitoring sku:", sku)
+				wg.Done()
+				return
+			}
+		}
+		if try > 1 {
+			log.Println("no longer monitoring sku:", sku)
+			wg.Done()
+			return
+		}
+		randomChar := charset[rand.Intn(len(charset))]
+		url := "https://www.vinted.com/api/v2/items/" + strconv.Itoa(sku) + "." + string(randomChar) + string(randomChar) + string(randomChar) + string(randomChar)
 		req, err := http.NewRequest(http.MethodGet, url, nil)
 		if err != nil {
+			m.rotate_proxy(*client.TlsClient)
+			general_tries += 1
 			if strings.Contains(err.Error(), "cannot assign requested address") {
 				log.Println("Retrying, Error occured: [ERR500] ", err)
 			}
@@ -169,7 +200,7 @@ func Make_request(latest_sku string, sku string, url string, session string, cli
 			continue
 		}
 		if resp.StatusCode != 200 {
-			log.Println("[%s] not found, retrying", sku)
+			log.Printf("[%d] not found, retrying", sku)
 			continue
 		}
 		body, err := io.ReadAll(resp.Body)
@@ -180,23 +211,32 @@ func Make_request(latest_sku string, sku string, url string, session string, cli
 		}
 		defer resp.Body.Close()
 
-		n_to_Reach_for_new_batch, err := strconv.Atoi(m.Latest_sku)
+		var bodyMap map[string]interface{}
+
+		// Unmarshal JSON into the map
+		err = json.Unmarshal(body, &bodyMap)
 		if err != nil {
-			log.Println("Error translating the sku to int")
+			fmt.Println("Error:", err)
+			continue
 		}
-		n_to_Reach_for_new_batch += BATCH_SIZE / 2
-
-		if sku > n_to_Reach_for_new_batch {
-
+		createdAtTs, ok := bodyMap["item"].(map[string]interface{})["created_at_ts"].(string)
+		if !ok {
+			println("created_at_ts field not found or not of type string")
+			continue
 		}
+		log.Println(createdAtTs)
+		latest_channel <- Sku{Sku: sku, Timeout: false}
 
+		wg.Done()
+		//ping item
+		return
 	}
 }
 
 func NewClient(_url string) (*Client, error) {
 	options := Options{
 		settings: []tls_client.HttpClientOption{
-			tls_client.WithTimeoutSeconds(15),
+			tls_client.WithTimeoutSeconds(10),
 			tls_client.WithClientProfile(profiles.Chrome_124),
 			tls_client.WithNotFollowRedirects(),
 		},
@@ -209,6 +249,44 @@ func NewClient(_url string) (*Client, error) {
 	return &Client{TlsClient: &client, url: _url}, nil
 }
 
-func (m *Latest_Sku_Monitor) Start_new_batch() {
+func (m *Latest_Sku_Monitor) Start_new_batch(latest_sku int, batch_size int) {
+	//log.Println("Starting a new batch at sku, ", latest_sku)
 
+	client, err := NewClient("https://www.vinted.com")
+	if err != nil {
+		println("Error starting a new batch: ", err)
+	}
+	sess, err := m.Get_session_cookie(client)
+	if err != nil {
+		println("error getting the session back")
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < batch_size; i++ {
+
+		wg.Add(1)
+		go func() {
+
+			Make_request(latest_sku+i, sess, client, m.Latest_channel, m, &wg)
+		}()
+
+	}
+	wg.Wait()
+	println("go routines finished ")
+
+	println("latest sku found:", m.Latest_sku)
+	m.New_batch_signal <- true
+}
+
+func (m *Latest_Sku_Monitor) rotate_proxy(client tls_client.HttpClient) {
+
+	randomInt := rand.Intn(len(m.Proxies))
+	err := client.SetProxy(m.Proxies[randomInt])
+	if err != nil {
+		println("error rotating proxies")
+	}
+
+}
+
+type Item struct {
+	CreatedAtTs string `json:"created_at_ts"`
 }

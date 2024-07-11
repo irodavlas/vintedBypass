@@ -150,7 +150,7 @@ type ItemDetails struct {
 	PriceNumeric           string    `json:"price_numeric"`
 	LastPushUpAt           time.Time `json:"last_push_up_at"`
 	LastPushUpAtNew        time.Time `json:"last_push_up_at_new"`
-	CreatedAtTS            time.Time `json:"created_at_ts"`
+	CreatedAtTS            string    `json:"created_at_ts"`
 	UpdatedAtTS            time.Time `json:"updated_at_ts"`
 	UserUpdatedAtTS        time.Time `json:"user_updated_at_ts"`
 	IsDelayedPublication   bool      `json:"is_delayed_publication"`
