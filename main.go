@@ -52,7 +52,11 @@ func main() {
 
 		}
 	}()
-
+	go func() {
+		for {
+			select {}
+		}
+	}()
 	client, err := utils.NewClient("https://www.vinted.com")
 	if err != nil {
 		log.Fatal(err)

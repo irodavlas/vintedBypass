@@ -22,13 +22,14 @@ type Sku struct {
 	Time    string
 }
 type Latest_Sku_Monitor struct {
-	Proxies          []string
-	Latest_channel   chan Sku
-	New_batch_signal chan bool
-	Latest_sku       int
-	Latest_batch_sku int
-	LatestMux        sync.Mutex
-	Session          string
+	active_goroutines sync.Map
+	Proxies           []string
+	Latest_channel    chan Sku
+	New_batch_signal  chan bool
+	Latest_sku        int
+	Latest_batch_sku  int
+	LatestMux         sync.Mutex
+	Session           string
 }
 
 type Client struct {
@@ -40,6 +41,34 @@ type Options struct {
 	settings []tls_client.HttpClientOption
 }
 
+func NewClient(_url string) (*Client, error) {
+	options := Options{
+		settings: []tls_client.HttpClientOption{
+			tls_client.WithTimeoutSeconds(10),
+			tls_client.WithClientProfile(profiles.Chrome_124),
+			tls_client.WithNotFollowRedirects(),
+		},
+	}
+	client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options.settings...)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Client{TlsClient: &client, url: _url}, nil
+}
+func (m *Latest_Sku_Monitor) register_goroutine(id int) {
+	m.active_goroutines.Store(id, true)
+}
+func (m *Latest_Sku_Monitor) deregister_goroutine(id int) {
+	m.active_goroutines.Store(id, false)
+}
+func (m *Latest_Sku_Monitor) delete_goroutine(id int) {
+	m.active_goroutines.Delete(id)
+}
+func (m *Latest_Sku_Monitor) isGoroutineActive(id int) interface{} {
+	value, _ := m.active_goroutines.Load(id)
+	return value
+}
 func (m *Latest_Sku_Monitor) Get_session_cookie(session_client *Client) (string, error) {
 
 	req, err := http.NewRequest(http.MethodGet, session_client.url, nil)
@@ -142,34 +171,55 @@ func (m *Latest_Sku_Monitor) Get_latest_sku(client *Client, session string) int 
 }
 
 // makes the item requests in a for loop and dies when item is found
-func Make_request(sku int, session string, client *Client, latest_channel chan Sku, m *Latest_Sku_Monitor, wg *sync.WaitGroup) {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	var try = -1
-	var general_tries = 0
+func Make_request(sku int, _session string, client *Client, latest_channel chan Sku, m *Latest_Sku_Monitor, wg *sync.WaitGroup) {
+	//const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	//var try = -1
+	var session = _session
+	var general_tries = -1
 	for {
 		general_tries++
+		if general_tries > 10 {
+			log.Println("no longer monitoring sku:", sku)
+			m.delete_goroutine(sku)
+			return
+		}
+		if general_tries > 0 {
+			if m.isGoroutineActive(sku) == true {
+				m.deregister_goroutine(sku)
+				wg.Done()
+			}
+		}
 
-		if m.Latest_sku > sku {
-			try++
+		/*
+			else if m.Latest_sku < sku && m.isGoroutineActive(sku) && general_tries > 2 {
+				m.deregisterGoroutine(sku)
+				wg.Done()
+				return
+			}
+		*/
+		/*
+			if m.Latest_sku > sku {
+				try++
 
-		} else {
-			if general_tries > 60 {
+			} else {
+				if general_tries > 60 {
+					log.Println("no longer monitoring sku:", sku)
+					wg.Done()
+					return
+				}
+			}
+			if try > 1 {
 				log.Println("no longer monitoring sku:", sku)
 				wg.Done()
 				return
 			}
-		}
-		if try > 1 {
-			log.Println("no longer monitoring sku:", sku)
-			wg.Done()
-			return
-		}
-		randomChar := charset[rand.Intn(len(charset))]
-		url := "https://www.vinted.com/api/v2/items/" + strconv.Itoa(sku) + "." + string(randomChar) + string(randomChar) + string(randomChar) + string(randomChar)
+		*/
+
+		//is goroutine is sorpassed clean it
+
+		url := "https://www.vinted.com/api/v2/items/" + strconv.Itoa(sku) + ".txt"
 		req, err := http.NewRequest(http.MethodGet, url, nil)
 		if err != nil {
-			m.rotate_proxy(*client.TlsClient)
-			general_tries += 1
 			if strings.Contains(err.Error(), "cannot assign requested address") {
 				log.Println("Retrying, Error occured: [ERR500] ", err)
 			}
@@ -196,17 +246,24 @@ func Make_request(sku int, session string, client *Client, latest_channel chan S
 
 		resp, err := (*client.TlsClient).Do(req)
 		if err != nil {
-			log.Println("Retrying, Error occured: ", err)
+			log.Println("Retrying, Error occured1: ", err)
+			continue
+		}
+		if len(resp.Header) == 0 {
+			session, err = m.Get_session_cookie(client)
+			if err != nil {
+				println("error changing Session Header")
+			}
 			continue
 		}
 		if resp.StatusCode != 200 {
-			log.Printf("[%d] not found, retrying", sku)
+			log.Printf("[%d], [%d] not found, retrying", sku, resp.StatusCode)
 			continue
 		}
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			log.Println("Retrying, Error occured: ", err)
-			resp.Body.Close()
+			log.Println("Retrying, Error opening the body: ", err)
+
 			continue
 		}
 		defer resp.Body.Close()
@@ -227,26 +284,13 @@ func Make_request(sku int, session string, client *Client, latest_channel chan S
 		log.Println(createdAtTs)
 		latest_channel <- Sku{Sku: sku, Timeout: false}
 
-		wg.Done()
 		//ping item
+		if m.isGoroutineActive(sku) == true {
+			m.delete_goroutine(sku)
+			wg.Done()
+		}
 		return
 	}
-}
-
-func NewClient(_url string) (*Client, error) {
-	options := Options{
-		settings: []tls_client.HttpClientOption{
-			tls_client.WithTimeoutSeconds(10),
-			tls_client.WithClientProfile(profiles.Chrome_124),
-			tls_client.WithNotFollowRedirects(),
-		},
-	}
-	client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options.settings...)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Client{TlsClient: &client, url: _url}, nil
 }
 
 func (m *Latest_Sku_Monitor) Start_new_batch(latest_sku int, batch_size int) {
@@ -264,16 +308,21 @@ func (m *Latest_Sku_Monitor) Start_new_batch(latest_sku int, batch_size int) {
 	for i := 0; i < batch_size; i++ {
 
 		wg.Add(1)
+		m.register_goroutine(latest_sku + i) //registering go routine
 		go func() {
-
 			Make_request(latest_sku+i, sess, client, m.Latest_channel, m, &wg)
 		}()
 
 	}
 	wg.Wait()
+	for i := 0; i < batch_size; i++ {
+		if m.Latest_sku < latest_sku+i {
+			m.delete_goroutine(latest_sku + i)
+		}
+	}
 	println("go routines finished ")
-
 	println("latest sku found:", m.Latest_sku)
+
 	m.New_batch_signal <- true
 }
 
