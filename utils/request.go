@@ -16,21 +16,15 @@ import (
 	"golang.org/x/exp/rand"
 )
 
-type Sku struct {
-	Sku     int
-	Timeout bool
-	Time    string
-}
 type Latest_Sku_Monitor struct {
-	Proxies          []string
-	Latest_channel   chan Sku
-	New_batch_signal chan bool
-	Latest_sku       int
-	Latest_batch_sku int
-	LatestMux        sync.Mutex
-	Session          string
+	Proxies        []string
+	Latest_channel chan int
+	Session        string
 }
-
+type Latest_sku struct {
+	Latest_sku int
+	LatestMux  sync.Mutex
+}
 type Client struct {
 	TlsClient *tls_client.HttpClient
 	url       string
@@ -39,6 +33,8 @@ type Client struct {
 type Options struct {
 	settings []tls_client.HttpClientOption
 }
+
+var MAX_RETRY = 80
 
 func (m *Latest_Sku_Monitor) Get_session_cookie(session_client *Client) (string, error) {
 
@@ -142,38 +138,27 @@ func (m *Latest_Sku_Monitor) Get_latest_sku(client *Client, session string) int 
 }
 
 // makes the item requests in a for loop and dies when item is found
-func Make_request(sku int, session string, client *Client, latest_channel chan Sku, m *Latest_Sku_Monitor, wg *sync.WaitGroup) {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	var try = -1
-	var general_tries = 0
+func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pid_list *Latest_sku) {
+
+	var last_pid = sku
+	var session = monitor.Session
+	println("Starting monitor on:", last_pid)
+	var retry_count = 0
 	for {
-		general_tries++
-
-		if m.Latest_sku > sku {
-			try++
-
-		} else if general_tries > 10 {
-			log.Println("no longer monitoring sku:", sku)
-			return
-		} 
-		if try > 1 {
-			wg.Done()
+		retry_count++
+		if retry_count >= MAX_RETRY {
+			last_pid = global_pid_list.get_new_pid()
+			retry_count = 0
+			continue
 		}
-		
-	
-		randomChar1 := charset[rand.Intn(len(charset))]
-		randomChar2 := charset[rand.Intn(len(charset))]
-		randomChar3 := charset[rand.Intn(len(charset))]
-		url := "https://www.vinted.com/api/v2/items/" + strconv.Itoa(sku) + "." + string(randomChar1) + string(randomChar2) + string(randomChar3) 
+		url := "https://www.vinted.com/api/v2/items/" + strconv.Itoa(last_pid) + ".txt"
 		req, err := http.NewRequest(http.MethodGet, url, nil)
 		if err != nil {
-			m.rotate_proxy(*client.TlsClient)
-			general_tries += 1
 			if strings.Contains(err.Error(), "cannot assign requested address") {
 				log.Println("Retrying, Error occured: [ERR500] ", err)
 			}
 			log.Println("Retrying, Error occured: ", err)
-			
+
 			continue
 		}
 		req.Header = http.Header{}
@@ -195,12 +180,20 @@ func Make_request(sku int, session string, client *Client, latest_channel chan S
 
 		resp, err := (*client.TlsClient).Do(req)
 		if err != nil {
-			println("timeout")
 			log.Println("Retrying, Error occured: ", err)
+			retry_count += 10
 			continue
 		}
 		if resp.StatusCode != 200 {
-			log.Printf("[%d] not found, retrying", sku)
+			//monitor.rotate_proxy(*client.TlsClient)
+			log.Printf("[%d] not found, retrying", last_pid)
+			continue
+		}
+		if len(resp.Header) == 0 {
+			session, err = monitor.Get_session_cookie(&client)
+			if err != nil {
+				log.Println("Error switching session")
+			}
 			continue
 		}
 		body, err := io.ReadAll(resp.Body)
@@ -209,28 +202,35 @@ func Make_request(sku int, session string, client *Client, latest_channel chan S
 			resp.Body.Close()
 			continue
 		}
-		defer resp.Body.Close()
 
 		var bodyMap map[string]interface{}
-
 		// Unmarshal JSON into the map
 		err = json.Unmarshal(body, &bodyMap)
 		if err != nil {
 			fmt.Println("Error:", err)
 			continue
 		}
+		resp.Body.Close()
 		createdAtTs, ok := bodyMap["item"].(map[string]interface{})["created_at_ts"].(string)
 		if !ok {
 			println("created_at_ts field not found or not of type string")
 			continue
 		}
 		log.Println(createdAtTs)
-		latest_channel <- Sku{Sku: sku, Timeout: false}
-
-		wg.Done()
+		monitor.Latest_channel <- last_pid
+		last_pid = global_pid_list.get_new_pid()
+		retry_count = 0
+		continue
 		//ping item
-		return
+
 	}
+}
+
+func (l *Latest_sku) get_new_pid() int {
+	l.LatestMux.Lock()
+	l.Latest_sku++
+	l.LatestMux.Unlock()
+	return l.Latest_sku
 }
 
 func NewClient(_url string) (*Client, error) {
@@ -249,32 +249,31 @@ func NewClient(_url string) (*Client, error) {
 	return &Client{TlsClient: &client, url: _url}, nil
 }
 
-func (m *Latest_Sku_Monitor) Start_new_batch(latest_sku int, batch_size int) {
+func (m *Latest_Sku_Monitor) Start_monitor() {
+	latestSku := &Latest_sku{
+		Latest_sku: 0, // Initial value for Latest_sku
+	}
 	//log.Println("Starting a new batch at sku, ", latest_sku)
-
 	client, err := NewClient("https://www.vinted.com")
 	if err != nil {
-		println("Error starting a new batch: ", err)
+		println("Error Creating client: ", err)
 	}
-	sess, err := m.Get_session_cookie(client)
-	if err != nil {
-		println("error getting the session back")
-	}
-	var wg sync.WaitGroup
-	for i := 0; i < batch_size; i++ {
+	latestSku.LatestMux.Lock()
+	latestSku.Latest_sku = m.Get_latest_sku(client, m.Session) + 1500
+	latestSku.LatestMux.Unlock()
 
-		wg.Add(1)
+	for i := 0; i < 300; i++ {
+
 		go func() {
-
-			Make_request(latest_sku+i, sess, client, m.Latest_channel, m, &wg)
+			client, err := NewClient("https://www.vinted.com")
+			if err != nil {
+				println("Error Creating client: ", err)
+			}
+			Make_request(latestSku.Latest_sku+i, *client, m, latestSku)
 		}()
 
 	}
-	wg.Wait()
-	println("go routines finished ")
 
-	println("latest sku found:", m.Latest_sku)
-	m.New_batch_signal <- true
 }
 
 func (m *Latest_Sku_Monitor) rotate_proxy(client tls_client.HttpClient) {
@@ -285,8 +284,4 @@ func (m *Latest_Sku_Monitor) rotate_proxy(client tls_client.HttpClient) {
 		println("error rotating proxies")
 	}
 
-}
-
-type Item struct {
-	CreatedAtTs string `json:"created_at_ts"`
 }

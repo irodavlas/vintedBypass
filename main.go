@@ -6,9 +6,8 @@ import (
 	"log"
 	"os"
 	"strings"
-	"sync"
 
-	utils "github.com/vintedMonitor/utils"
+	"github.com/vintedMonitor/utils"
 )
 
 const (
@@ -18,56 +17,49 @@ const (
 	PL_BASE_URL = "https://www.vinted.pl"
 )
 const UK_API_URL = UK_BASE_URL + "/api/v2/items/"
-const BATCH_SIZE = 400
 
 func main() {
-
-	monitor := utils.Latest_Sku_Monitor{
-		Latest_channel:   make(chan utils.Sku, 99999),
-		New_batch_signal: make(chan bool, 100),
-		Latest_sku:       0,
-		LatestMux:        sync.Mutex{},
-		Proxies:          parse_proxy_file(),
+	url := "https://www.vinted.co.uk/catalog?catalog[]=84&brand_ids[]=88&status_ids[]=2&status_ids[]=3&price_to=15&currency=GBP&color_ids[]=27&color_ids[]=9&order=newest_first"
+	filterData, err := utils.ParseURLParameters(url)
+	if err != nil {
+		fmt.Println("Error parsing URL:", err)
+		return
 	}
-	go func() {
-		for {
-			select {
-			case item := <-monitor.Latest_channel:
-				//log.Printf("sku:%d Time:%s", item.Sku, item.Time)
-				monitor.LatestMux.Lock()
-				//put here logic to start new batches
-				//use another value such as last round sku
-				if item.Sku > monitor.Latest_sku {
-					monitor.Latest_sku = item.Sku
+
+	filterDict := utils.CreateFilterDict(filterData)
+	for key, value := range filterDict {
+		fmt.Printf("%s: %v\n", key, value)
+	}
+	/*
+		monitor := utils.Latest_Sku_Monitor{
+			Latest_channel: make(chan int, 99999),
+			Proxies:        parse_proxy_file(),
+		}
+		go func() {
+			for {
+				select {
+				case sku := <-monitor.Latest_channel:
+					log.Println(sku)
+
 				}
 
-				monitor.Latest_batch_sku = monitor.Latest_sku
-				monitor.LatestMux.Unlock()
-
-				//go monitor.Start_new_batch(monitor.Latest_batch_sku, 100)
-			case <-monitor.New_batch_signal:
-				go monitor.Start_new_batch(monitor.Latest_sku, BATCH_SIZE)
 			}
-			//case start new batch once all terminate
+		}()
 
+		client, err := utils.NewClient("https://www.vinted.com")
+		if err != nil {
+			log.Fatal(err)
 		}
-	}()
+		//start mointor for starting page
+		monitor.Session, err = monitor.Get_session_cookie(client)
+		if err != nil {
+			log.Fatal(err)
+		}
+		// need a goroutine that updated the session once in a while
 
-	client, err := utils.NewClient("https://www.vinted.com")
-	if err != nil {
-		log.Fatal(err)
-	}
-	//start mointor for starting page
-	monitor.Session, err = monitor.Get_session_cookie(client)
-	if err != nil {
-		log.Fatal(err)
-	}
-	// need a goroutine that updated the session once in a while
-	monitor.Latest_batch_sku = monitor.Get_latest_sku(client, monitor.Session)
-	print(monitor.Latest_batch_sku)
-	monitor.Start_new_batch(monitor.Latest_batch_sku, BATCH_SIZE)
-	select {}
-
+		monitor.Start_monitor()
+		select {}
+	*/
 }
 func formatProxy(proxy string) string {
 	// Split the proxy string by colon
