@@ -7,7 +7,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/vintedMonitor/utils"
+	"github.com/vintedMonitor/data"
+	"github.com/vintedMonitor/database"
+	"github.com/vintedMonitor/types"
 )
 
 const (
@@ -16,30 +18,48 @@ const (
 	DE_BASE_URL = "https://www.vinted.de"
 	PL_BASE_URL = "https://www.vinted.pl"
 )
-const UK_API_URL = UK_BASE_URL + "/api/v2/items/"
+const (
+	UK_CURRENCY = "£"
+	FR_CURRENCY = "€"
+	DE_CURRENCY = "€"
+	PL_CURRENCY = "zł"
+)
+
+var Regions = map[int]types.Region{
+	16: {BaseUrl: FR_BASE_URL, Currency: FR_CURRENCY},
+	13: {BaseUrl: UK_BASE_URL, Currency: UK_CURRENCY},
+	2:  {BaseUrl: DE_BASE_URL, Currency: DE_CURRENCY},
+	15: {BaseUrl: PL_BASE_URL, Currency: PL_CURRENCY},
+}
 
 func main() {
-	url := "https://www.vinted.co.uk/catalog?catalog[]=84&brand_ids[]=88&status_ids[]=2&status_ids[]=3&price_to=15&currency=GBP&color_ids[]=27&color_ids[]=9&order=newest_first"
-	filterData, err := utils.ParseURLParameters(url)
+	monitors := make(map[string]*data.Monitor)
+	db, err := database.Connect_to_database()
 	if err != nil {
-		fmt.Println("Error parsing URL:", err)
-		return
+		db.DB.Close()
+		log.Fatal("Error connecting to DB: ", err)
 	}
-
-	filterDict := utils.CreateFilterDict(filterData)
-	for key, value := range filterDict {
-		fmt.Printf("%s: %v\n", key, value)
+	users, err := db.Get_all_users()
+	if err != nil {
+		log.Fatal("Error retrieving users:", err)
+	}
+	for i, user := range *users {
+		monitor, err := data.Start_user_dispatcher(i, user, db)
+		if err != nil {
+			log.Fatalf("Error creating monitor for user: %s, with error: %s", user, err)
+		}
+		monitors[user] = monitor
 	}
 	/*
 		monitor := utils.Latest_Sku_Monitor{
-			Latest_channel: make(chan int, 99999),
+			Latest_channel: make(chan types.ItemDetails, 99999),
 			Proxies:        parse_proxy_file(),
 		}
 		go func() {
 			for {
 				select {
-				case sku := <-monitor.Latest_channel:
-					log.Println(sku)
+				case item := <-monitor.Latest_channel:
+					log.Println(item.Country, item.CountryID)
 
 				}
 
@@ -58,8 +78,9 @@ func main() {
 		// need a goroutine that updated the session once in a while
 
 		monitor.Start_monitor()
-		select {}
 	*/
+	select {}
+
 }
 func formatProxy(proxy string) string {
 	// Split the proxy string by colon

@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"net/url"
 	"strconv"
 )
@@ -16,6 +17,7 @@ type FilterData struct {
 	MaterialIDs []int
 	StatusIDs   []int
 	SearchText  *string
+	BaseURL     *string
 }
 
 func ParseURLParameters(data string) (*FilterData, error) {
@@ -53,6 +55,9 @@ func ParseURLParameters(data string) (*FilterData, error) {
 		return nil
 	}
 
+	// Get the base URL
+	baseURL := parsedURL.Scheme + "://" + parsedURL.Host
+
 	filterData := &FilterData{
 		BrandIDs:    parseIntArray("brand_ids[]"),
 		Catalog:     parseIntArray("catalog[]"),
@@ -64,6 +69,7 @@ func ParseURLParameters(data string) (*FilterData, error) {
 		MaterialIDs: parseIntArray("material_ids[]"),
 		StatusIDs:   parseIntArray("status_ids[]"),
 		SearchText:  parseString("search_text"),
+		BaseURL:     &baseURL,
 	}
 
 	return filterData, nil
@@ -73,22 +79,24 @@ func CreateFilterDict(filter *FilterData) map[string]interface{} {
 	filterDict := make(map[string]interface{})
 
 	setIfNotNull := func(key string, value interface{}, name string) {
-		if value != nil {
-			switch v := value.(type) {
-			case []int:
-				if len(v) > 0 {
-					filterDict[name] = v
-				}
-			case *string:
-				if *v != "" {
-					filterDict[name] = *v
-				}
-			case *int:
+
+		switch v := value.(type) {
+		case []int:
+			if len(v) > 0 {
+				filterDict[name] = v
+			}
+		case *string:
+			if v != nil && *v != "" {
+				filterDict[name] = *v
+			}
+		case *int:
+			if v != nil {
 				filterDict[name] = *v
 			}
 		}
 	}
 
+	// Usage of setIfNotNull remains the same
 	setIfNotNull("color_ids", filter.ColorIDs, "color_ids")
 	setIfNotNull("brand_ids", filter.BrandIDs, "brand_ids")
 	setIfNotNull("size_ids", filter.SizeIDs, "size_ids")
@@ -97,6 +105,20 @@ func CreateFilterDict(filter *FilterData) map[string]interface{} {
 	setIfNotNull("catalog", filter.Catalog, "catalog")
 	setIfNotNull("search_text", filter.SearchText, "search_text")
 	setIfNotNull("currency", filter.Currency, "currency")
+	setIfNotNull("price_from", filter.PriceFrom, "price_from")
+	setIfNotNull("price_to", filter.PriceTo, "price_to")
+	filterDict["base_url"] = *filter.BaseURL
 
+	return filterDict
+}
+
+func Filter_user_subscription(url string) map[string]interface{} {
+	filterData, err := ParseURLParameters(url)
+	if err != nil {
+		fmt.Println("Error parsing URL:", err)
+		return nil
+	}
+
+	filterDict := CreateFilterDict(filterData)
 	return filterDict
 }

@@ -13,12 +13,11 @@ import (
 	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"
 	"github.com/vintedMonitor/types"
-	"golang.org/x/exp/rand"
 )
 
 type Latest_Sku_Monitor struct {
 	Proxies        []string
-	Latest_channel chan int
+	Latest_channel chan types.ItemDetails
 	Session        string
 }
 type Latest_sku struct {
@@ -34,7 +33,7 @@ type Options struct {
 	settings []tls_client.HttpClientOption
 }
 
-var MAX_RETRY = 80
+var MAX_RETRY = 60
 
 func (m *Latest_Sku_Monitor) Get_session_cookie(session_client *Client) (string, error) {
 
@@ -137,7 +136,7 @@ func (m *Latest_Sku_Monitor) Get_latest_sku(client *Client, session string) int 
 
 }
 
-// makes the item requests in a for loop and dies when item is found
+// makes the item requests in a for loop
 func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pid_list *Latest_sku) {
 
 	var last_pid = sku
@@ -203,21 +202,16 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 			continue
 		}
 
-		var bodyMap map[string]interface{}
-		// Unmarshal JSON into the map
-		err = json.Unmarshal(body, &bodyMap)
+		var data types.Response
+		err = json.Unmarshal(body, &data)
 		if err != nil {
 			fmt.Println("Error:", err)
 			continue
 		}
+
 		resp.Body.Close()
-		createdAtTs, ok := bodyMap["item"].(map[string]interface{})["created_at_ts"].(string)
-		if !ok {
-			println("created_at_ts field not found or not of type string")
-			continue
-		}
-		log.Println(createdAtTs)
-		monitor.Latest_channel <- last_pid
+
+		monitor.Latest_channel <- data.Item
 		last_pid = global_pid_list.get_new_pid()
 		retry_count = 0
 		continue
@@ -272,16 +266,6 @@ func (m *Latest_Sku_Monitor) Start_monitor() {
 			Make_request(latestSku.Latest_sku+i, *client, m, latestSku)
 		}()
 
-	}
-
-}
-
-func (m *Latest_Sku_Monitor) rotate_proxy(client tls_client.HttpClient) {
-
-	randomInt := rand.Intn(len(m.Proxies))
-	err := client.SetProxy(m.Proxies[randomInt])
-	if err != nil {
-		println("error rotating proxies")
 	}
 
 }
