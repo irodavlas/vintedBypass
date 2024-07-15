@@ -45,7 +45,7 @@ func (m *Monitor) Start_user_dispatcher(db *database.MyDB) {
 	log.Println("Starting dispatcher for user:", m.Username)
 	go func() {
 		{
-			ticker := time.NewTicker(10 * time.Second) // Adjust interval as needed
+			ticker := time.NewTicker(180 * time.Second) // Adjust interval as needed
 			defer ticker.Stop()
 			for {
 				select {
