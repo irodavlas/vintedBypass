@@ -116,13 +116,8 @@ func (w *Webhook) Send(u string) error {
 	}
 }
 
-type Message struct {
-	Item     types.ItemDetails
-	Currency string
-	Webhook  string
-}
+func Send_webhook(u string, region_info types.Region, prod types.ItemDetails) {
 
-func Send_webhook(u string, currency string, prod types.ItemDetails) {
 	webhook := &Webhook{}
 	parsedTime, err := time.Parse(time.RFC3339, prod.StringTime)
 	if err != nil {
@@ -134,7 +129,7 @@ func Send_webhook(u string, currency string, prod types.ItemDetails) {
 	embed := Embed{}
 	Title := prod.Title
 	Description := fmt.Sprintf("Posted: <t:%d:R>", unixTimestamp)
-	Price := currency + prod.Price.Amount
+	Price := region_info.Currency + prod.Price.Amount
 	Photo := prod.Photos[0].URL
 	Store := prod.Country
 	Size := prod.SizeTitle
@@ -143,7 +138,7 @@ func Send_webhook(u string, currency string, prod types.ItemDetails) {
 
 	webhook.SetContent("")
 	embed.SetTitle(Title)
-	embed.SetURL(prod.URL)
+	embed.SetURL(region_info.BaseUrl + prod.Path)
 	embed.SetDescription(Description)
 	embed.SetColor(5549236)
 	embed.SetImage(Photo)
@@ -161,7 +156,9 @@ func Send_webhook(u string, currency string, prod types.ItemDetails) {
 
 	// Send the webhook to the specified URL
 	webhookURL := u
+
 	err = webhook.Send(webhookURL)
+
 	if err != nil {
 		fmt.Println("Error sending webhook:", err)
 	} else {

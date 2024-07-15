@@ -6,6 +6,7 @@ require (
 	github.com/bogdanfinn/fhttp v0.5.28
 	github.com/bogdanfinn/tls-client v1.7.5
 	github.com/mattn/go-sqlite3 v1.14.22
+	golang.org/x/exp v0.0.0-20221205204356-47842c84f3db
 )
 
 require (

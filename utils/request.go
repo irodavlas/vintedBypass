@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	http "github.com/bogdanfinn/fhttp"
 	tls_client "github.com/bogdanfinn/tls-client"
@@ -141,7 +142,7 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 
 	var last_pid = sku
 	var session = monitor.Session
-	println("Starting monitor on:", last_pid)
+
 	var retry_count = 0
 	for {
 		retry_count++
@@ -185,7 +186,7 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 		}
 		if resp.StatusCode != 200 {
 			//monitor.rotate_proxy(*client.TlsClient)
-			log.Printf("[%d] not found, retrying", last_pid)
+			//log.Printf("[%d] not found, retrying", last_pid)
 			continue
 		}
 		if len(resp.Header) == 0 {
@@ -210,7 +211,7 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 		}
 
 		resp.Body.Close()
-
+		data.Item.StringTime = time.Now().Format(time.RFC3339)
 		monitor.Latest_channel <- data.Item
 		last_pid = global_pid_list.get_new_pid()
 		retry_count = 0
@@ -244,6 +245,7 @@ func NewClient(_url string) (*Client, error) {
 }
 
 func (m *Latest_Sku_Monitor) Start_monitor() {
+	log.Println("starting monitor")
 	latestSku := &Latest_sku{
 		Latest_sku: 0, // Initial value for Latest_sku
 	}
