@@ -7,13 +7,14 @@ import (
 	"log"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	http "github.com/bogdanfinn/fhttp"
 	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"
 	"github.com/vintedMonitor/types"
+	"golang.org/x/exp/rand"
 )
 
 type Latest_Sku_Monitor struct {
@@ -22,8 +23,8 @@ type Latest_Sku_Monitor struct {
 	Session        string
 }
 type Latest_sku struct {
-	Latest_sku int
-	LatestMux  sync.Mutex
+	Latest_sku int64
+	//LatestMux  sync.Mutex
 }
 type Client struct {
 	TlsClient *tls_client.HttpClient
@@ -34,7 +35,7 @@ type Options struct {
 	settings []tls_client.HttpClientOption
 }
 
-var MAX_RETRY = 60
+var MAX_RETRY = 100
 
 func (m *Latest_Sku_Monitor) Get_session_cookie(session_client *Client) (string, error) {
 
@@ -86,7 +87,7 @@ func extractSessionCookie(cookies []string) string {
 	}
 	return ""
 }
-func (m *Latest_Sku_Monitor) Get_latest_sku(client *Client, session string) int {
+func (m *Latest_Sku_Monitor) Get_latest_sku(client *Client, session string) int64 {
 	for {
 
 		url := "https://www.vinted.com/api/v2/catalog/items?page=1&per_page=96&search_text=&catalog_ids=&order=newest_first&size_ids=&brand_ids=&status_ids=&color_ids=&material_ids="
@@ -132,7 +133,7 @@ func (m *Latest_Sku_Monitor) Get_latest_sku(client *Client, session string) int 
 			continue
 		}
 
-		return int(data.Items[0].ID)
+		return data.Items[0].ID
 	}
 
 }
@@ -145,13 +146,14 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 
 	var retry_count = 0
 	for {
+
 		retry_count++
 		if retry_count >= MAX_RETRY {
-			last_pid = global_pid_list.get_new_pid()
+			last_pid = int(global_pid_list.get_new_pid())
 			retry_count = 0
 			continue
 		}
-		url := "https://www.vinted.com/api/v2/items/" + strconv.Itoa(last_pid) + ".txt"
+		url := "https://www.vinted.com/api/v2/items/" + strconv.Itoa(int(last_pid)) + ".txt"
 		req, err := http.NewRequest(http.MethodGet, url, nil)
 		if err != nil {
 			if strings.Contains(err.Error(), "cannot assign requested address") {
@@ -161,6 +163,7 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 
 			continue
 		}
+
 		req.Header = http.Header{}
 		req.Header.Add("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
 		req.Header.Add("accept-language", "en-US,en;q=0.9")
@@ -181,12 +184,13 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 		resp, err := (*client.TlsClient).Do(req)
 		if err != nil {
 			log.Println("Retrying, Error occured: ", err)
-			retry_count += 10
+			retry_count += 1
 			continue
 		}
 		if resp.StatusCode != 200 {
 			//monitor.rotate_proxy(*client.TlsClient)
-			//log.Printf("[%d] not found, retrying", last_pid)
+			log.Printf("[%d] not found, retrying", last_pid)
+
 			continue
 		}
 		if len(resp.Header) == 0 {
@@ -194,6 +198,7 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 			if err != nil {
 				log.Println("Error switching session")
 			}
+			println("Session")
 			continue
 		}
 		body, err := io.ReadAll(resp.Body)
@@ -213,7 +218,8 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 		resp.Body.Close()
 		data.Item.StringTime = time.Now().Format(time.RFC3339)
 		monitor.Latest_channel <- data.Item
-		last_pid = global_pid_list.get_new_pid()
+		last_pid = int(global_pid_list.get_new_pid())
+
 		retry_count = 0
 		continue
 		//ping item
@@ -221,17 +227,18 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 	}
 }
 
-func (l *Latest_sku) get_new_pid() int {
-	l.LatestMux.Lock()
-	l.Latest_sku++
-	l.LatestMux.Unlock()
-	return l.Latest_sku
+func (l *Latest_sku) get_new_pid() int64 {
+	newPid := atomic.AddInt64(&l.Latest_sku, 1)
+	// Print the new PID
+	fmt.Println("New PID:", newPid)
+	// Return the new PID
+	return newPid
 }
 
 func NewClient(_url string) (*Client, error) {
 	options := Options{
 		settings: []tls_client.HttpClientOption{
-			tls_client.WithTimeoutSeconds(10),
+			tls_client.WithTimeoutSeconds(15),
 			tls_client.WithClientProfile(profiles.Chrome_124),
 			tls_client.WithNotFollowRedirects(),
 		},
@@ -254,9 +261,9 @@ func (m *Latest_Sku_Monitor) Start_monitor() {
 	if err != nil {
 		println("Error Creating client: ", err)
 	}
-	latestSku.LatestMux.Lock()
+	//latestSku.LatestMux.Lock()
 	latestSku.Latest_sku = m.Get_latest_sku(client, m.Session) + 1500
-	latestSku.LatestMux.Unlock()
+	//latestSku.LatestMux.Unlock()
 
 	for i := 0; i < 300; i++ {
 
@@ -265,9 +272,20 @@ func (m *Latest_Sku_Monitor) Start_monitor() {
 			if err != nil {
 				println("Error Creating client: ", err)
 			}
-			Make_request(latestSku.Latest_sku+i, *client, m, latestSku)
+			Make_request(int(latestSku.Latest_sku)+i, *client, m, latestSku)
 		}()
 
 	}
+
+}
+
+func (m *Latest_Sku_Monitor) rotate_proxy(client tls_client.HttpClient) {
+
+	randomInt := rand.Intn(len(m.Proxies))
+	err := client.SetProxy(m.Proxies[randomInt])
+	if err != nil {
+		log.Println("error while rotating proxies:", err)
+	}
+	time.Sleep(1 * time.Second)
 
 }

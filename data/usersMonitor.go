@@ -43,6 +43,7 @@ var Regions = map[int]types.Region{
 
 func (m *Monitor) Start_user_dispatcher(db *database.MyDB) {
 	log.Println("Starting dispatcher for user:", m.Username)
+	time.Sleep(2 * time.Second)
 	go func() {
 		{
 			ticker := time.NewTicker(180 * time.Second) // Adjust interval as needed
