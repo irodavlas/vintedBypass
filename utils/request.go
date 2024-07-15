@@ -192,7 +192,7 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 		if resp.StatusCode != 200 {
 			//monitor.rotate_proxy(*client.TlsClient)
 			log.Printf("[%d] not found, retrying", last_pid)
-
+			time.Sleep(1 * time.Second)
 			continue
 		}
 		if len(resp.Header) == 0 {
