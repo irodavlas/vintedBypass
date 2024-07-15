@@ -186,6 +186,7 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 		if err != nil {
 			log.Println("Retrying, Error occured: ", err)
 			retry_count += 1
+			time.Sleep(1 * time.Second)
 			continue
 		}
 		if resp.StatusCode != 200 {
