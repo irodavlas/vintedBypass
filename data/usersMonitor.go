@@ -46,7 +46,7 @@ func (m *Monitor) Start_user_dispatcher(db *database.MyDB) {
 	time.Sleep(2 * time.Second)
 	go func() {
 		{
-			ticker := time.NewTicker(180 * time.Second) // Adjust interval as needed
+			ticker := time.NewTicker(2 * time.Second) // Adjust interval as needed
 			defer ticker.Stop()
 			for {
 				select {

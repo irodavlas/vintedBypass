@@ -35,7 +35,7 @@ type Options struct {
 	settings []tls_client.HttpClientOption
 }
 
-var MAX_RETRY = 100
+var MAX_RETRY = 200
 
 func (m *Latest_Sku_Monitor) Get_session_cookie(session_client *Client) (string, error) {
 
@@ -149,6 +149,7 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 
 		retry_count++
 		if retry_count >= MAX_RETRY {
+			log.Println("Dropping sku: ", last_pid)
 			last_pid = int(global_pid_list.get_new_pid())
 			retry_count = 0
 			continue
@@ -262,7 +263,7 @@ func (m *Latest_Sku_Monitor) Start_monitor() {
 		println("Error Creating client: ", err)
 	}
 	//latestSku.LatestMux.Lock()
-	latestSku.Latest_sku = m.Get_latest_sku(client, m.Session) + 1500
+	latestSku.Latest_sku = m.Get_latest_sku(client, m.Session) + 800
 	//latestSku.LatestMux.Unlock()
 
 	for i := 0; i < 300; i++ {
