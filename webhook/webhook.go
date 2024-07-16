@@ -124,6 +124,12 @@ func Send_webhook(u string, region_info types.Region, prod types.ItemDetails) {
 		fmt.Println("Error parsing time:", err)
 		return
 	}
+	createdAtTime, err := time.Parse(time.RFC3339, prod.CreatedAtTs)
+	if err != nil {
+		fmt.Println("Error parsing created at time:", err)
+		return
+	}
+	diff := parsedTime.Sub(createdAtTime).Seconds()
 	unixTimestamp := parsedTime.Unix()
 	// Create an embed
 	embed := Embed{}
@@ -143,7 +149,7 @@ func Send_webhook(u string, region_info types.Region, prod types.ItemDetails) {
 	embed.SetColor(5549236)
 	embed.SetImage(Photo)
 	embed.SetFooter(fmt.Sprintf("NRC BOT • %s", prod.StringTime), "https://cdn.discordapp.com/attachments/1220385098541826161/1249380232163496047/NRCUK.png?ex=66671783&is=6665c603&hm=7c3a76b0ca29a947a14ca25f2791dfa8e447bbc3dd3fddfd9f065379d821bf69&")
-
+	embed.AddField("Time Elapsed", fmt.Sprintf("%f", diff), false)
 	embed.AddField("💷 Item Price", Price, false)
 
 	embed.AddField("Store", Store, false)

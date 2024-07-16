@@ -36,7 +36,7 @@ type Options struct {
 }
 
 var latestFound int64
-var MAX_RETRY = 50
+var MAX_RETRY = 200
 
 func (m *Latest_Sku_Monitor) Get_session_cookie(session_client *Client) (string, error) {
 
@@ -150,11 +150,7 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 
 		retry_count++
 		if retry_count >= MAX_RETRY {
-			if int(get_latest_pid_found()) < last_pid {
-				retry_count = 0
-				log.Println("Restarting on sku, we went to far: ", last_pid)
-				continue
-			}
+
 			log.Println("Dropping sku: ", last_pid)
 			last_pid = int(global_pid_list.get_new_pid())
 			retry_count = 0
@@ -223,23 +219,30 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 		}
 
 		resp.Body.Close()
+
 		data.Item.StringTime = time.Now().Format(time.RFC3339)
 		monitor.Latest_channel <- data.Item
-		update_latest_found(int64(last_pid))
-		last_pid = int(global_pid_list.get_new_pid())
 
+		last_pid = int(global_pid_list.get_new_pid())
+		parsedTime, err := time.Parse(time.RFC3339, data.Item.StringTime)
+		if err != nil {
+			fmt.Println("Error parsing time:", err)
+			return
+		}
+		createdAtTime, err := time.Parse(time.RFC3339, data.Item.CreatedAtTs)
+		if err != nil {
+			fmt.Println("Error parsing created at time:", err)
+			return
+		}
+		diff := parsedTime.Sub(createdAtTime).Seconds()
+		log.Println(diff)
 		retry_count = 0
 		continue
 		//ping item
 
 	}
 }
-func update_latest_found(pid int64) {
-	atomic.StoreInt64(&latestFound, pid)
-}
-func get_latest_pid_found() int64 {
-	return atomic.LoadInt64(&latestFound)
-}
+
 func (l *Latest_sku) get_new_pid() int64 {
 	newPid := atomic.AddInt64(&l.Latest_sku, 1)
 	// Print the new PID
@@ -275,7 +278,7 @@ func (m *Latest_Sku_Monitor) Start_monitor() {
 		println("Error Creating client: ", err)
 	}
 	//latestSku.LatestMux.Lock()
-	latestSku.Latest_sku = m.Get_latest_sku(client, m.Session) + 2000
+	latestSku.Latest_sku = m.Get_latest_sku(client, m.Session) + 3000
 	//latestSku.LatestMux.Unlock()
 
 	for i := 0; i < 400; i++ {

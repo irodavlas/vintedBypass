@@ -134,7 +134,6 @@ type ItemDetails struct {
 	IsUnisex                int                   `json:"is_unisex"`
 	ModerationStatus        int                   `json:"moderation_status"`
 	IsHidden                bool                  `json:"is_hidden"`
-	IsClosed                int                   `json:"is_closed"`
 	IsClosedNew             bool                  `json:"is_closed_new"`
 	FavouriteCount          int                   `json:"favourite_count"`
 	ActiveBidCount          int                   `json:"active_bid_count"`
