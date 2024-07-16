@@ -76,6 +76,9 @@ func (m *Monitor) Start_user_dispatcher(db *database.MyDB) {
 func Create_user_dispatcher(id int, username string, db *database.MyDB) (*Monitor, error) {
 	monitor := Monitor{Id: id, Username: username, Item_channel: make(chan types.ItemDetails, 9999)}
 	subs, err := monitor.fetchSubscriptions(db)
+	for _, sub := range subs {
+		log.Printf("%v", sub.Preferences)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -102,52 +105,39 @@ func (m *Monitor) check_keywords(item types.ItemDetails) {
 	}
 }
 func matchesFilter(item types.ItemDetails, filters map[string]interface{}) bool {
-	if brandIDs, ok := filters["brand_ids"]; ok {
-		if brandIDsSlice, ok := brandIDs.([]int); ok && brandIDsSlice != nil && !containsInt(brandIDsSlice, item.BrandID) {
+
+	if brandIDs, ok := filters["brand_ids"].([]int); ok && brandIDs != nil && !containsInt(brandIDs, item.BrandID) {
+		return false
+	}
+
+	if catalog, ok := filters["catalog"].([]int); ok && catalog != nil && !containsInt(catalog, item.CatalogID) {
+		return false
+	}
+
+	if priceFrom, ok := filters["price_from"].(int); ok && priceFrom != 0 {
+		price := parsePrice(item.PriceNumeric)
+		if price < priceFrom {
 			return false
 		}
 	}
 
-	if catalog, ok := filters["catalog"]; ok {
-		if catalogSlice, ok := catalog.([]int); ok && catalogSlice != nil && !containsInt(catalogSlice, item.CatalogID) {
+	if priceTo, ok := filters["price_to"].(int); ok && priceTo != 0 {
+		price := parsePrice(item.PriceNumeric)
+		if price > priceTo {
 			return false
 		}
 	}
 
-	if priceFrom, ok := filters["price_from"]; ok {
-		if priceFromInt, ok := priceFrom.(int); ok && priceFromInt != 0 {
-			price := parsePrice(item.PriceNumeric)
-			if price < priceFromInt {
-				return false
-			}
-		}
+	if currency, ok := filters["currency"].(string); ok && currency != "" && item.Currency != currency {
+		return false
 	}
 
-	if priceTo, ok := filters["price_to"]; ok {
-		if priceToInt, ok := priceTo.(int); ok && priceToInt != 0 {
-			price := parsePrice(item.PriceNumeric)
-			if price > priceToInt {
-				return false
-			}
-		}
+	if statusIDs, ok := filters["status_ids"].([]int); ok && statusIDs != nil && !containsInt(statusIDs, item.StatusID) {
+		return false
 	}
 
-	if currency, ok := filters["currency"]; ok {
-		if currencyStr, ok := currency.(string); ok && currencyStr != "" && item.Currency != currencyStr {
-			return false
-		}
-	}
-
-	if statusIDs, ok := filters["status_ids"]; ok {
-		if statusIDsSlice, ok := statusIDs.([]int); ok && statusIDsSlice != nil && !containsInt(statusIDsSlice, item.StatusID) {
-			return false
-		}
-	}
-
-	if searchText, ok := filters["search_text"]; ok {
-		if searchTextStr, ok := searchText.(string); ok && searchTextStr != "" && !strings.Contains(strings.ToLower(item.UserLogin), strings.ToLower(searchTextStr)) {
-			return false
-		}
+	if searchText, ok := filters["search_text"].(string); ok && searchText != "" && !strings.Contains(strings.ToLower(item.Title), strings.ToLower(searchText)) {
+		return false
 	}
 
 	return true
