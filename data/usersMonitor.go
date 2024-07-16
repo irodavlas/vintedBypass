@@ -46,7 +46,7 @@ func (m *Monitor) Start_user_dispatcher(db *database.MyDB) {
 	time.Sleep(2 * time.Second)
 	go func() {
 		{
-			ticker := time.NewTicker(2 * time.Second) // Adjust interval as needed
+			ticker := time.NewTicker(180 * time.Second) // Adjust interval as needed
 			defer ticker.Stop()
 			for {
 				select {
@@ -102,38 +102,52 @@ func (m *Monitor) check_keywords(item types.ItemDetails) {
 	}
 }
 func matchesFilter(item types.ItemDetails, filters map[string]interface{}) bool {
-	if brandIDs, ok := filters["brand_ids"].([]int); ok && brandIDs != nil && !containsInt(brandIDs, item.BrandID) {
-		return false
-	}
-
-	if catalog, ok := filters["catalog"].([]int); ok && catalog != nil && !containsInt(catalog, item.CatalogID) {
-		return false
-	}
-
-	if priceFrom, ok := filters["price_from"].(int); ok && priceFrom != 0 {
-		price := parsePrice(item.PriceNumeric)
-		if price < priceFrom {
+	if brandIDs, ok := filters["brand_ids"]; ok {
+		if brandIDsSlice, ok := brandIDs.([]int); ok && brandIDsSlice != nil && !containsInt(brandIDsSlice, item.BrandID) {
 			return false
 		}
 	}
 
-	if priceTo, ok := filters["price_to"].(int); ok && priceTo != 0 {
-		price := parsePrice(item.PriceNumeric)
-		if price > priceTo {
+	if catalog, ok := filters["catalog"]; ok {
+		if catalogSlice, ok := catalog.([]int); ok && catalogSlice != nil && !containsInt(catalogSlice, item.CatalogID) {
 			return false
 		}
 	}
 
-	if currency, ok := filters["currency"].(string); ok && currency != "" && item.Currency != currency {
-		return false
+	if priceFrom, ok := filters["price_from"]; ok {
+		if priceFromInt, ok := priceFrom.(int); ok && priceFromInt != 0 {
+			price := parsePrice(item.PriceNumeric)
+			if price < priceFromInt {
+				return false
+			}
+		}
 	}
 
-	if statusIDs, ok := filters["status_ids"].([]int); ok && statusIDs != nil && !containsInt(statusIDs, item.StatusID) {
-		return false
+	if priceTo, ok := filters["price_to"]; ok {
+		if priceToInt, ok := priceTo.(int); ok && priceToInt != 0 {
+			price := parsePrice(item.PriceNumeric)
+			if price > priceToInt {
+				return false
+			}
+		}
 	}
 
-	if searchText, ok := filters["search_text"].(string); ok && searchText != "" && !strings.Contains(strings.ToLower(item.UserLogin), strings.ToLower(searchText)) {
-		return false
+	if currency, ok := filters["currency"]; ok {
+		if currencyStr, ok := currency.(string); ok && currencyStr != "" && item.Currency != currencyStr {
+			return false
+		}
+	}
+
+	if statusIDs, ok := filters["status_ids"]; ok {
+		if statusIDsSlice, ok := statusIDs.([]int); ok && statusIDsSlice != nil && !containsInt(statusIDsSlice, item.StatusID) {
+			return false
+		}
+	}
+
+	if searchText, ok := filters["search_text"]; ok {
+		if searchTextStr, ok := searchText.(string); ok && searchTextStr != "" && !strings.Contains(strings.ToLower(item.UserLogin), strings.ToLower(searchTextStr)) {
+			return false
+		}
 	}
 
 	return true

@@ -35,7 +35,6 @@ type Options struct {
 	settings []tls_client.HttpClientOption
 }
 
-var latestFound int64
 var MAX_RETRY = 200
 
 func (m *Latest_Sku_Monitor) Get_session_cookie(session_client *Client) (string, error) {
@@ -281,7 +280,7 @@ func (m *Latest_Sku_Monitor) Start_monitor() {
 	latestSku.Latest_sku = m.Get_latest_sku(client, m.Session) + 3000
 	//latestSku.LatestMux.Unlock()
 
-	for i := 0; i < 400; i++ {
+	for i := 0; i < 200; i++ {
 
 		go func() {
 			client, err := NewClient("https://www.vinted.com")
