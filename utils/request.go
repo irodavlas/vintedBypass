@@ -35,7 +35,8 @@ type Options struct {
 	settings []tls_client.HttpClientOption
 }
 
-var MAX_RETRY = 200
+var latestFound int64
+var MAX_RETRY = 50
 
 func (m *Latest_Sku_Monitor) Get_session_cookie(session_client *Client) (string, error) {
 
@@ -149,6 +150,11 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 
 		retry_count++
 		if retry_count >= MAX_RETRY {
+			if int(get_latest_pid_found()) < last_pid {
+				retry_count = 0
+				log.Println("Restarting on sku, we went to far: ", last_pid)
+				continue
+			}
 			log.Println("Dropping sku: ", last_pid)
 			last_pid = int(global_pid_list.get_new_pid())
 			retry_count = 0
@@ -185,14 +191,13 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 		resp, err := (*client.TlsClient).Do(req)
 		if err != nil {
 			log.Println("Retrying, Error occured: ", err)
-			retry_count += 1
-			time.Sleep(1 * time.Second)
+
 			continue
 		}
 		if resp.StatusCode != 200 {
 			//monitor.rotate_proxy(*client.TlsClient)
 			log.Printf("[%d] not found, retrying", last_pid)
-			time.Sleep(1 * time.Second)
+
 			continue
 		}
 		if len(resp.Header) == 0 {
@@ -200,7 +205,7 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 			if err != nil {
 				log.Println("Error switching session")
 			}
-			println("Session")
+
 			continue
 		}
 		body, err := io.ReadAll(resp.Body)
@@ -220,6 +225,7 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 		resp.Body.Close()
 		data.Item.StringTime = time.Now().Format(time.RFC3339)
 		monitor.Latest_channel <- data.Item
+		update_latest_found(int64(last_pid))
 		last_pid = int(global_pid_list.get_new_pid())
 
 		retry_count = 0
@@ -228,7 +234,12 @@ func Make_request(sku int, client Client, monitor *Latest_Sku_Monitor, global_pi
 
 	}
 }
-
+func update_latest_found(pid int64) {
+	atomic.StoreInt64(&latestFound, pid)
+}
+func get_latest_pid_found() int64 {
+	return atomic.LoadInt64(&latestFound)
+}
 func (l *Latest_sku) get_new_pid() int64 {
 	newPid := atomic.AddInt64(&l.Latest_sku, 1)
 	// Print the new PID
@@ -264,10 +275,10 @@ func (m *Latest_Sku_Monitor) Start_monitor() {
 		println("Error Creating client: ", err)
 	}
 	//latestSku.LatestMux.Lock()
-	latestSku.Latest_sku = m.Get_latest_sku(client, m.Session) + 800
+	latestSku.Latest_sku = m.Get_latest_sku(client, m.Session) + 2000
 	//latestSku.LatestMux.Unlock()
 
-	for i := 0; i < 300; i++ {
+	for i := 0; i < 400; i++ {
 
 		go func() {
 			client, err := NewClient("https://www.vinted.com")
